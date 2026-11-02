@@ -1,0 +1,28 @@
+[project]
+name = "tronpay"
+version = "0.1.0"
+description = "Send USDT on TRON with energy rented from ITRX"
+readme = "README.md"
+authors = [
+    { name = "Romamo", email = "github@romavm.dev" }
+]
+# tronpy 0.6.2 pins coincurve<21 on 3.14, and coincurve 20 has no 3.14 wheels
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "httpx>=0.28.1",
+    "keyring>=25.7.0",
+    "qrcode>=8.2",
+    "tronpy[offline]>=0.6.2",
+]
+
+[project.scripts]
+tronpay = "tronpay:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
