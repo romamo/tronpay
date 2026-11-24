@@ -4,10 +4,11 @@ from tronpy import Tron
 from tronpy.abi import trx_abi
 from tronpy.exceptions import AddressNotFound
 from tronpy.keys import PrivateKey
-from tronpy.providers import HTTPProvider
 
 # tronpy's own serializer for raw_data (it computes txids with it); the size of a transaction is its bandwidth
 from tronpy.proto.transaction import _raw_data_to_protobuf
+from tronpy.providers import HTTPProvider
+from tronpy.tron import TransactionRet
 
 from tronpay.network import Network
 from tronpay.values import Bandwidth, Energy, Sun, TokenAmount, TronAddress
@@ -28,6 +29,12 @@ class Resources:
 class Prices:
     energy: Sun  # burned per unit of energy the account lacks
     bandwidth: Sun  # burned per byte when the account lacks bandwidth
+
+
+@dataclass(frozen=True)
+class Broadcast:
+    txid: str
+    result: TransactionRet
 
 
 @dataclass(frozen=True)
@@ -80,7 +87,8 @@ class Chain:
         length_bytes = len(_varint(raw))
         return Bandwidth(1 + length_bytes + raw + SIGNATURE_BYTES + RESULT_BYTES)
 
-    def transfer(self, key: PrivateKey, recipient: TronAddress, amount: TokenAmount, fee_limit: Sun) -> Receipt:
+    def broadcast(self, key: PrivateKey, recipient: TronAddress, amount: TokenAmount, fee_limit: Sun) -> Broadcast:
+        """Sign and broadcast a USDT transfer; its txid is known from here on, whatever happens next"""
         sender = key.public_key.to_base58check_address()
         tx = (
             self._usdt.functions.transfer(str(recipient), amount.units)
@@ -89,12 +97,15 @@ class Chain:
             .build()
             .sign(key)
         )
-        info = tx.broadcast().wait(timeout=90)
+        return Broadcast(txid=tx.txid, result=tx.broadcast())
+
+    def confirm(self, broadcast: Broadcast) -> Receipt:
+        info = broadcast.result.wait(timeout=90)
         receipt = info.get("receipt", {})
         if receipt.get("result") != "SUCCESS":
-            raise RuntimeError(f"transaction {tx.txid} failed: {info}")
+            raise RuntimeError(f"transaction {broadcast.txid} failed: {info}")
         return Receipt(
-            txid=tx.txid,
+            txid=broadcast.txid,
             energy_used=Energy(int(receipt.get("energy_usage_total", 0))),
             burned=Sun(int(info.get("fee", 0))),
         )
