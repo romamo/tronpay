@@ -42,9 +42,14 @@ tronpay receive main                 # address and QR to receive TRX
 tronpay balance [wallet|contact|address]
 tronpay send main alice 100 --dry-run
 tronpay send main alice 100          # add --burn to burn TRX instead of renting energy
+tronpay send alice 100               # the sender is chosen from the history, see below
 tronpay history                      # payments made with tronpay
 tronpay --network nile ...           # the Nile testnet (no rental there, energy is burned)
 ```
+
+## Choosing the sender
+
+Without a sender, `send` takes the wallet that last paid the recipient (from `history.jsonl`, on the same network, a payment that was broadcast or shown as a QR) and holds the amount with an activated account. When it does not, it tries the wallet that paid before that, and so on, printing each one it skips. When no wallet that paid before holds the amount, it lists every other wallet that does, with its USDT and TRX, and asks for the number
 
 ## How `send` works
 
