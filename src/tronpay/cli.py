@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import qrcode
 from tronpy.keys import is_base58check_address
 
-from tronpay import journal, keys
+from tronpay import journal, keys, pick
 from tronpay.book import Book, Contact, Name, Signer, Wallet, home
 from tronpay.chain import Chain
 from tronpay.itrx import Itrx
@@ -55,7 +55,11 @@ def main() -> None:
     p.add_argument("target", nargs="?", help="default: every wallet")
 
     p = sub.add_parser("send", help="check the recipient, cover the energy, send USDT")
-    p.add_argument("sender", help="wallet name")
+    p.add_argument(
+        "sender",
+        nargs="?",
+        help="wallet name; default: the last wallet that paid the recipient and holds the amount, else a choice",
+    )
     p.add_argument("recipient", help="wallet or contact name from the address book")
     p.add_argument("amount", help="USDT, e.g. 100.50")
     p.add_argument("--dry-run", action="store_true", help="stop after the plan")
@@ -175,13 +179,16 @@ def balance(book: Book, c: Chain, target: str | None) -> None:
 
 
 def send(book: Book, log: Journal, network: Network, args: argparse.Namespace) -> None:
-    sender = book.wallet(Name(args.sender))
     recipient_name = book_name(book, args.recipient)
     recipient = book.address(recipient_name)
     amount = TokenAmount.parse(args.amount)
+    c = chain(network)
+    if args.sender is None:
+        sender = choose_sender(book, log, network, c, recipient_name, recipient, amount)
+    else:
+        sender = book.wallet(Name(args.sender))
     if recipient == sender.address:
         raise SystemExit("the recipient is the sender")
-    c = chain(network)
 
     print(f"Send {amount} USDT on {network.name}")
     print(f"  from {sender.name} {sender.address}")
@@ -299,6 +306,44 @@ def send(book: Book, log: Journal, network: Network, args: argparse.Namespace) -
         print(f"Scan with Trust Wallet on the phone that holds {sender.name}:")
         print_qr(link)
         print(link)
+
+
+def choose_sender(
+    book: Book,
+    log: Journal,
+    network: Network,
+    c: Chain,
+    recipient_name: Name,
+    recipient: TronAddress,
+    amount: TokenAmount,
+) -> Wallet:
+    """The wallet that last paid the recipient and holds the amount; when there is none, the one you pick"""
+    wallets = book.wallets()
+    if not wallets:
+        raise SystemExit("no wallets yet: tronpay create <name>")
+    history = pick.paid_before(log.payments(), wallets, network.name, recipient)
+    choice = pick.choose(history, wallets, recipient, amount, lambda w: funds(c, w))
+    for s in choice.skipped:
+        print(f"Skipped {s.wallet.name}: paid {recipient_name} before, but has {s.funds}")
+    if choice.chosen is not None:
+        print(f"From {choice.chosen.wallet.name}: it paid {recipient_name} before and has {choice.chosen.funds}")
+        print()
+        return choice.chosen.wallet
+    if not choice.options:
+        raise SystemExit(f"no wallet holds {amount} USDT and is activated")
+    reason = "no wallet that paid it before holds the amount" if history else "no wallet paid it before"
+    print(f"Choose the wallet to pay {recipient_name} from ({reason}):")
+    for number, o in enumerate(choice.options, start=1):
+        print(f"  {number}. {o.wallet.name!s:<16} {o.wallet.address}  {o.funds}")
+    answer = input("Wallet number: ").strip()
+    if not answer.isdigit() or not 1 <= int(answer) <= len(choice.options):
+        raise SystemExit("cancelled")
+    print()
+    return choice.options[int(answer) - 1].wallet
+
+
+def funds(c: Chain, wallet: Wallet) -> pick.Funds:
+    return pick.Funds(usdt=c.usdt_balance(wallet.address), trx=c.trx_balance(wallet.address))
 
 
 def book_name(book: Book, text: str) -> Name:
